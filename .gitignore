@@ -1,0 +1,17 @@
+# Environment Variables
+.env
+
+# Google Service Credentials
+credentials/*.json
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Virtual env
+.venv/
+env/
+
+# Node/Vite
+node_modules/
+dist/
