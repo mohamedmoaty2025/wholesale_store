@@ -1,10 +1,8 @@
-# orders/serializers.py
 from decimal import Decimal
 from django.db import transaction
 from rest_framework import serializers
 from catalog.models import Product
 from .models import Order, OrderItem
-
 
 class OrderItemReadSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source='product.name', read_only=True)
@@ -12,11 +10,9 @@ class OrderItemReadSerializer(serializers.ModelSerializer):
         model = OrderItem
         fields = ('id', 'product', 'product_name', 'quantity', 'unit_price')
 
-
 class CreateOrderItemSerializer(serializers.Serializer):
     product_id = serializers.IntegerField()
     quantity = serializers.IntegerField(min_value=1)
-
 
 class CreateOrderSerializer(serializers.Serializer):
     customer_name = serializers.CharField(required=False, allow_blank=True)
@@ -39,13 +35,26 @@ class CreateOrderSerializer(serializers.Serializer):
     @transaction.atomic
     def create(self, validated_data):
         items_data = validated_data.pop('items', [])
+
+        # إذا كان المستخدم مسجلاً في الـ request، استخدم بياناته
+        user = self.context['request'].user if self.context['request'].user.is_authenticated else None
+
+        # استخدام بيانات المستخدم إذا كان مسجلاً
+        customer_name = validated_data.get('customer_name', user.first_name + ' ' + user.last_name if user else '')
+        customer_phone = validated_data.get('customer_phone', user.profile.mobile if user and user.profile else '')
+        customer_email = validated_data.get('customer_email', user.email if user else '')
+        customer_city = validated_data.get('customer_city', '')
+        customer_address = validated_data.get('customer_address', user.profile.address if user and user.profile else '')
+
+        # إنشاء الطلب مع استخدام بيانات العميل من request.user إذا كانت موجودة
         order = Order.objects.create(
-            customer_name = validated_data.get('customer_name', '') or None,
-            customer_phone = validated_data.get('customer_phone', '') or None,
-            customer_email = validated_data.get('customer_email', '') or None,
-            customer_city = validated_data.get('customer_city', '') or None,
-            customer_address = validated_data.get('customer_address', '') or None,
-            total = Decimal('0.00'),
+            user=user,  # ربط الطلب بالمستخدم المسجل
+            customer_name=customer_name,
+            customer_phone=customer_phone,
+            customer_email=customer_email,
+            customer_city=customer_city,
+            customer_address=customer_address,
+            total=Decimal('0.00'),
         )
 
         total = Decimal('0.00')
@@ -74,11 +83,10 @@ class CreateOrderSerializer(serializers.Serializer):
 
         return order
 
-
 class OrderReadSerializer(serializers.ModelSerializer):
     items = OrderItemReadSerializer(many=True, read_only=True)
     class Meta:
         model = Order
         fields = ('id', 'created_at', 'status', 'total',
-                  'customer_name','customer_phone','customer_email','customer_city','customer_address',
+                  'customer_name', 'customer_phone', 'customer_email', 'customer_city', 'customer_address',
                   'items')

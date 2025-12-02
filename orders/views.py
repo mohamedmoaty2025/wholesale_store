@@ -1,17 +1,14 @@
-# orders/views.py
 from decimal import Decimal
 from django.db import transaction
 from rest_framework import status, permissions
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from django.conf import settings
-import logging
-
 from .models import Order, OrderItem
 from catalog.models import Product
-from .serializers import CreateOrderSerializer, OrderReadSerializer  # تأكد أن هذه الأسماء موجودة في serializers.py
+from .serializers import CreateOrderSerializer, OrderReadSerializer  # تأكد من هذه الأسماء في serializers.py
+import logging
 
-# Google sheets helper
+# Google Sheets helper
 from utils.google_sheets import append_order_to_sheet
 
 logger = logging.getLogger(__name__)
@@ -28,7 +25,7 @@ class CreateOrderView(APIView):
       "customer_address":"...",
       "items": [{"product_id":1, "quantity": 10}, ...]
     }
-    يقوم بإنشاء Order + OrderItem ثم يجرب يضيف صف في Google Sheet (لا يفشل الطلب لو فشل الشيت).
+    يقوم بإنشاء Order + OrderItem ثم يحاول يضيف صف في Google Sheet (لا يفشل الطلب لو فشل الشيت).
     """
     permission_classes = [permissions.AllowAny]
 
@@ -38,14 +35,24 @@ class CreateOrderView(APIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
-        # إنشاء الطلب
+        # إذا كان العميل مسجل دخول، استخدم بياناته من request.user
+        user = request.user if request.user.is_authenticated else None
+
+        # استخدام بيانات العميل المسجل لتعبئة بيانات الطلب في حالة عدم إرسالها
+        customer_name = data.get('customer_name', user.first_name + ' ' + user.last_name if user else '')
+        customer_phone = data.get('customer_phone', user.profile.mobile if user and user.profile else '')
+        customer_email = data.get('customer_email', user.email if user else '')
+        customer_city = data.get('customer_city', '')
+        customer_address = data.get('customer_address', user.profile.address if user and user.profile else '')
+
+        # إنشاء الطلب مع استخدام بيانات العميل من request.user إذا كانت موجودة
         order = Order.objects.create(
-            user=request.user if request.user.is_authenticated else None,
-            customer_name=data.get('customer_name', '') or '',
-            customer_phone=data.get('customer_phone', '') or '',
-            customer_email=data.get('customer_email', '') or '',
-            customer_city=data.get('customer_city', '') or '',
-            customer_address=data.get('customer_address', '') or '',
+            user=user,
+            customer_name=customer_name,
+            customer_phone=customer_phone,
+            customer_email=customer_email,
+            customer_city=customer_city,
+            customer_address=customer_address,
             status='pending',
             total=Decimal('0.00')
         )
@@ -53,6 +60,7 @@ class CreateOrderView(APIView):
         total = Decimal('0.00')
         created_items = []
 
+        # إضافة العناصر إلى الطلب
         items_data = data.get('items', [])
         for it in items_data:
             prod_id = it.get('product_id')
@@ -85,7 +93,7 @@ class CreateOrderView(APIView):
         order.total = total
         order.save(update_fields=['total'])
 
-        # جهّز صف لإرساله للشيت
+        # تجهيز صف لإرساله إلى جوجل شيت
         try:
             items_desc = []
             for it in created_items:
@@ -104,14 +112,11 @@ class CreateOrderView(APIView):
                 str(order.total),
                 order.created_at.strftime('%Y-%m-%d %H:%M:%S') if getattr(order, 'created_at', None) else ''
             ]
-            # نضع append داخل try/except لأننا لا نريد فشل إنشاء الطلب لو الشيت فشل
             try:
-                append_order_to_sheet(row)
+                append_order_to_sheet(row)  # إضافة البيانات إلى جوجل شيت
             except Exception as e:
-                # سجل الخطأ لكن لا ترميه - الطلب تم إنشاؤه بنجاح
                 logger.exception("Failed to append order to Google Sheet: %s", e)
         except Exception as ex:
-            # لو حدث أي خطأ أثناء تجهيز الصف لا نلغي الطلب، فقط نسجل
             logger.exception("Error preparing row for Google Sheets: %s", ex)
 
         out = OrderReadSerializer(order, context={'request': request})

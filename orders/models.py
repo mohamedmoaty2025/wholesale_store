@@ -5,20 +5,17 @@ from django.db import models
 from django.utils import timezone
 from catalog.models import Product
 
-
 class Order(models.Model):
     """
     نموذج الطلب الرئيسي.
     يحتوي على بيانات العميل، الحالة، الاجمالي، وتاريخ الانشاء.
     """
-
     STATUS_PENDING = 'pending'
-    STATUS_CONFIRMED = 'Confirmed'
+    STATUS_CONFIRMED = 'confirmed'
     STATUS_PAID = 'paid'
     STATUS_CANCELLED = 'cancelled'
     STATUS_FULFILLED = 'fulfilled'
     
-
     STATUS_CHOICES = (
         (STATUS_PENDING, 'Pending'),
         (STATUS_CONFIRMED, 'Confirmed'),
@@ -27,17 +24,14 @@ class Order(models.Model):
         (STATUS_FULFILLED, 'Fulfilled'),
     )
 
-    # من يرتبط بالطلب (مستخدم مسجّل) -- اختياري
     user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
 
-    # بيانات حالة الطلب ووقت الإنشاء
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING)
     created_at = models.DateTimeField(auto_now_add=True)
 
-    # مبالغ
     total = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'))
 
-    # === حقول بيانات العميل ===
+    # بيانات العميل
     customer_name = models.CharField(max_length=200, blank=True, null=True)
     customer_phone = models.CharField(max_length=50, blank=True, null=True)
     customer_email = models.EmailField(blank=True, null=True)
@@ -60,6 +54,24 @@ class Order(models.Model):
         self.save(update_fields=['total'])
         return self.total
 
+    def save(self, *args, **kwargs):
+        """
+        نعدل الحقول الخاصة بالعميل لتأخذ بياناته من الـ request.user إذا كان مسجلاً.
+        """
+        if self.user:
+            if not self.customer_name:
+                self.customer_name = f"{self.user.first_name} {self.user.last_name}"
+            if not self.customer_phone:
+                self.customer_phone = self.user.profile.mobile if self.user.profile else ''
+            if not self.customer_email:
+                self.customer_email = self.user.email
+            if not self.customer_address:
+                self.customer_address = self.user.profile.address if self.user.profile else ''
+            if not self.customer_city:
+                self.customer_city = self.user.profile.city if self.user.profile else ''
+
+        super().save(*args, **kwargs)
+
 
 class OrderItem(models.Model):
     """
@@ -73,7 +85,6 @@ class OrderItem(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        # نظهر SKU أو اسم المنتج مع الكمية والسعر
         try:
             sku = self.product.sku
         except Exception:
